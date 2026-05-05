@@ -413,7 +413,7 @@ class PostMessageInteraction(BaseInteraction):
         if self._dynamic_target_hwnd != 0:
             if win32gui.IsWindow(self._dynamic_target_hwnd):
                 return self._dynamic_target_hwnd
-        return self.hwnd_window.top_hwnd if self.hwnd_window.top_hwnd else self.hwnd_window.hwnd
+        return self.hwnd_window.get_priority_hwnd()
 
     def on_visible(self, visible):
         self.activated = visible

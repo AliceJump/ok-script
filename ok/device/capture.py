@@ -693,6 +693,9 @@ class HwndWindow:
         self.top_offset_x = 0
         self.top_offset_y = 0
 
+        self.hwnd_priority_list = []
+        self._priority_lock = threading.RLock()
+
         self.hwnd_class = hwnd_class
         self.top_hwnd_class = top_hwnd_class
         self.pos_valid = False
@@ -717,6 +720,100 @@ class HwndWindow:
 
     def stop(self):
         self.stop_event.set()
+
+    def register_hwnd_in_priority(self, hwnd: int, prepend: bool = False):
+        """Register an hwnd in the priority list.
+
+        Sub-windows should be registered with prepend=True so they are tried
+        first. The main game window should use prepend=False (appended to end).
+        Duplicate entries are removed before re-inserting so the list stays compact.
+        """
+        if not hwnd or hwnd <= 0:
+            return
+        with self._priority_lock:
+            if hwnd in self.hwnd_priority_list:
+                self.hwnd_priority_list.remove(hwnd)
+            if prepend:
+                self.hwnd_priority_list.insert(0, hwnd)
+            else:
+                self.hwnd_priority_list.append(hwnd)
+        logger.debug(f'register_hwnd_in_priority {"prepend" if prepend else "append"} hwnd={hwnd} list_size={len(self.hwnd_priority_list)}')
+
+    def _clean_priority_list(self):
+        """Remove stale entries from the priority list.
+
+        An entry is removed when its window handle is no longer valid OR is no
+        longer visible (i.e. the window has been closed or hidden).
+        """
+        with self._priority_lock:
+            before = len(self.hwnd_priority_list)
+            self.hwnd_priority_list = [
+                hwnd for hwnd in self.hwnd_priority_list
+                if self._is_hwnd_alive(hwnd)
+            ]
+            removed = before - len(self.hwnd_priority_list)
+            if removed:
+                logger.info(f'_clean_priority_list: removed {removed} stale entries, remaining={self.hwnd_priority_list}')
+
+    @staticmethod
+    def _is_hwnd_alive(hwnd: int) -> bool:
+        try:
+            return bool(win32gui.IsWindow(hwnd) and win32gui.IsWindowVisible(hwnd))
+        except Exception:
+            return False
+
+    def get_priority_hwnd(self) -> int:
+        """Return the first valid and visible hwnd from the priority list.
+
+        Falls back to the raw ``self.hwnd`` when the list is empty or all entries
+        are stale.
+        """
+        with self._priority_lock:
+            for hwnd in self.hwnd_priority_list:
+                if self._is_hwnd_alive(hwnd):
+                    return hwnd
+        return self.hwnd
+
+    def start_search_child_windows(self):
+        """Launch a background thread that enumerates all top-level windows
+        belonging to the same process as the main game window and registers
+        newly found ones at the front of the priority list.
+        """
+        def _search():
+            if not self.hwnd or self.hwnd <= 0:
+                return
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(self.hwnd)
+                if pid <= 0:
+                    return
+                found = []
+
+                def _enum_callback(hwnd, _):
+                    if hwnd == self.hwnd:
+                        return True
+                    try:
+                        _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
+                        if window_pid != pid:
+                            return True
+                        if not win32gui.IsWindow(hwnd) or not win32gui.IsWindowVisible(hwnd):
+                            return True
+                        rect = win32gui.GetWindowRect(hwnd)
+                        w, h = rect[2] - rect[0], rect[3] - rect[1]
+                        if w > 10 and h > 10:
+                            found.append(hwnd)
+                    except Exception:
+                        pass
+                    return True
+
+                win32gui.EnumWindows(_enum_callback, None)
+                for child_hwnd in found:
+                    self.register_hwnd_in_priority(child_hwnd, prepend=True)
+                if found:
+                    logger.info(f'start_search_child_windows: found {len(found)} sibling windows for pid={pid}')
+            except Exception as e:
+                logger.error(f'start_search_child_windows error for pid={pid}', e)
+
+        threading.Thread(target=_search, name="search_child_windows", daemon=True).start()
 
     def bring_to_front(self):
         if self.hwnd:
@@ -776,6 +873,7 @@ class HwndWindow:
     def update_window_size(self):
         while not self.app_exit_event.is_set() and not self.stop_event.is_set():
             self.do_update_window_size()
+            self._clean_priority_list()
             time.sleep(0.2)
         if self.hwnd and self.mute_option.get('Mute Game while in Background'):
             logger.info(f'exit reset mute state to 0')
@@ -808,6 +906,14 @@ class HwndWindow:
                 logger.info(
                     f'do_update_window_size find_hwnd {self.hwnd} top {hwnds[0][0] if hwnds else self.hwnd} {self.exe_full_path} {win32gui.GetClassName(self.hwnd)} real:{real_x_offset},{real_y_offset},{real_width},{real_height}')
                 changed = True
+                # Register the main window at the back (lowest priority) and any
+                # overlay / top-level companion windows at the front.
+                self.register_hwnd_in_priority(self.hwnd, prepend=False)
+                for h_info in hwnds:
+                    if h_info[0] != self.hwnd:
+                        self.register_hwnd_in_priority(h_info[0], prepend=True)
+                # Async search for additional sibling windows sharing the same PID.
+                self.start_search_child_windows()
 
             if find_hwnd_res > 0:
                 self.hwnds = hwnds
