@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QSizePolicy
-from PySide6.QtGui import QFont, QFontMetrics
+from PySide6.QtGui import QFontMetrics
 from qfluentwidgets import PushButton, BodyLabel
 from ok.gui.widget.FlowLayout import FlowLayout
 
@@ -12,7 +12,7 @@ class LabelAndButtonList(ConfigLabelAndWidget):
     A widget with two-column layout:
     - Left: title and description (from ConfigLabelAndWidget)
     - Right: label (top), option buttons (middle), delete button (bottom)
-    
+
     Usage in config_type:
         config_type = {
             'my_list': {
@@ -26,12 +26,12 @@ class LabelAndButtonList(ConfigLabelAndWidget):
         super().__init__(config_desc, config, key)
         self.options = options
         self.key = key
-        
+
         # Create the right side vertical layout
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(10)
-        
+
         # Top: Display label (font size: 16px, same as subtitle level)
         self.display_label = BodyLabel()
         self.display_label.setWordWrap(True)
@@ -46,7 +46,7 @@ class LabelAndButtonList(ConfigLabelAndWidget):
         self.display_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.update_display_label()
         right_layout.addWidget(self.display_label, stretch=0)
-        
+
         # Middle: Buttons area using shared FlowLayout (wraps automatically)
         buttons_flow = FlowLayout()
         # ensure buttons area keeps reasonable height
@@ -54,32 +54,33 @@ class LabelAndButtonList(ConfigLabelAndWidget):
         buttons_flow.setMinimumHeight(40)
         self.option_buttons = []
         for option in options:
+            # options come from external/task domain: use global app translation
             btn = PushButton(self._translate_option(option))
             btn.clicked.connect(lambda checked=False, opt=option: self.add_item(opt))
             self.option_buttons.append(btn)
             buttons_flow.add_widget(btn)
         right_layout.addWidget(buttons_flow)
-        
+
         # Bottom: Delete and Reset buttons
         bottom_buttons_layout = QHBoxLayout()
         bottom_buttons_layout.setContentsMargins(0, 0, 0, 0)
         bottom_buttons_layout.setSpacing(5)
-        
-        self.delete_btn = PushButton(og.app.tr("Delete Last Item"))
+
+        self.delete_btn = PushButton(self.tr("Delete Last Item"))
         self.delete_btn.clicked.connect(self.delete_last_item)
         self.delete_btn.setMinimumHeight(28)
         bottom_buttons_layout.addWidget(self.delete_btn)
-        
-        self.reset_btn = PushButton(og.app.tr("Reset"))
+
+        self.reset_btn = PushButton(self.tr("Reset"))
         self.reset_btn.clicked.connect(self.reset_to_empty)
         self.reset_btn.setMinimumHeight(28)
         bottom_buttons_layout.addWidget(self.reset_btn)
-        
+
         bottom_buttons_layout.addStretch()
         right_layout.addLayout(bottom_buttons_layout, stretch=0)
-        
+
         right_layout.addStretch()  # Fill remaining vertical space
-        
+
         # Add right layout to main layout
         self.add_layout(right_layout, stretch=1)
 
@@ -90,7 +91,7 @@ class LabelAndButtonList(ConfigLabelAndWidget):
             current = []
         # if stored as string (old), convert to list
         if isinstance(current, str):
-            current = [s.strip() for s in current.split(',') if s.strip()]
+            current = [s.strip() for s in current.split(",") if s.strip()]
         # allow duplicates
         current.append(item)
         self.update_config(current)
@@ -103,7 +104,7 @@ class LabelAndButtonList(ConfigLabelAndWidget):
             return
         # normalize string fallback
         if isinstance(current, str):
-            items = [item.strip() for item in current.split(',') if item.strip()]
+            items = [item.strip() for item in current.split(",") if item.strip()]
         else:
             items = list(current)
         if items:
@@ -122,11 +123,12 @@ class LabelAndButtonList(ConfigLabelAndWidget):
         if value is None:
             display = ""
         elif isinstance(value, list):
+            # display selected items with global translation
             display = ", ".join(self._translate_option(item) for item in value)
         else:
             # fallback for old string-based storage
             display = self._translate_option(str(value))
-        self.display_label.setText(display if display else og.app.tr("(empty)"))
+        self.display_label.setText(display if display else self.tr("(empty)"))
 
     def update_value(self):
         """Update the display when config changes externally"""
