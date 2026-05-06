@@ -1139,12 +1139,17 @@ class BaseTask(OCR):
         (before ``after_init`` is invoked by the task manager) for this to
         take effect.
         """
-        self.default_config.update({
+        multi_account_defaults = {
             "Multi Account Mode": False,
             "Multi Account Independent Config": False,
             "Account List": "account1\naccount2,password2\naccount3",
-        })
-        self.config_description.update({
+        }
+        self.default_config = {
+            **multi_account_defaults,
+            **{key: value for key, value in self.default_config.items() if key not in multi_account_defaults},
+        }
+
+        multi_account_descriptions = {
             "Multi Account Mode": (
                 "Enable multi-account mode\n"
                 "Need at least one account already logged in"
@@ -1157,7 +1162,17 @@ class BaseTask(OCR):
                 "Account list, one per line\n"
                 "Format: username or username,password (password is optional)"
             ),
-        })
+        }
+        self.config_description = {
+            **multi_account_descriptions,
+            **{key: value for key, value in self.config_description.items() if key not in multi_account_descriptions},
+        }
+
+        # Group the multi-account configs: Multi Account Mode as parent group
+        self.default_config_group["Multi Account Mode"] = [
+            "Multi Account Independent Config",
+            "Account List",
+        ]
 
     def get_account_list(self):
         account_str = self.config.get("Account List", "")
