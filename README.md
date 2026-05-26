@@ -38,6 +38,47 @@ pip install ok-script
 compile_i18n.cmd
 ```
 
+## Web 部署（前端静态托管）
+
+当前仓库主要是 Windows/PySide 桌面端代码，不包含现成的前端构建产物目录。  
+已提供最小 Web 托管入口，可用于部署你已有的前端产物。
+
+### 1) 依赖拆分
+
+* 桌面端/完整开发依赖：`requirements-desktop.txt`
+* Web 部署依赖：`requirements-web.txt`（仅标准库，无 GUI/Windows 依赖）
+
+### 2) 放置前端产物
+
+默认静态目录为 `web/`（仓库内已放置占位 `index.html`）。  
+你也可以通过环境变量或参数指定其他目录。
+
+### 3) 启动服务（默认端口 10086）
+
+```commandline
+ok serve_web
+```
+
+可选参数：
+
+```commandline
+ok serve_web --host 0.0.0.0 --port 10086 --static-dir web
+```
+
+环境变量覆盖：
+
+* `PORT` 或 `WEB_PORT`：覆盖端口（默认 `10086`）
+* `WEB_STATIC_DIR`：覆盖静态目录（默认 `web`）
+
+### 4) 健康检查
+
+* `GET /health` -> `{"status":"ok"}`
+* `GET /` -> 返回 `index.html`
+
+### 5) 反向代理建议
+
+建议由 Nginx/Caddy 反向代理到 `http://127.0.0.1:10086`，并在代理层处理 HTTPS、域名和缓存策略。
+
 ## 文档和示例代码
 
 * [游戏自动化入门](docs/intro_to_automation/README.md)

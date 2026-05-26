@@ -52,6 +52,16 @@ def run_task_command(args):
     return 0
 
 
+def serve_web_command(args):
+    from ok.web.server import run_web_server
+    run_web_server(
+        host=args.host,
+        port=args.port,
+        static_dir=args.static_dir,
+    )
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="ok")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -66,6 +76,18 @@ def build_parser():
         help="Config import target, for example src.config:config or config:config",
     )
     run_task_parser.set_defaults(func=run_task_command)
+
+    serve_web_parser = subparsers.add_parser(
+        "serve_web",
+        help="Serve frontend static files and health endpoint",
+    )
+    default_port = int(os.getenv("PORT", os.getenv("WEB_PORT", "10086")))
+    serve_web_parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    serve_web_parser.add_argument("--port", type=int, default=default_port,
+                                  help="Bind port (default: PORT/WEB_PORT/10086)")
+    serve_web_parser.add_argument("--static-dir", default=os.getenv("WEB_STATIC_DIR", "web"),
+                                  help="Static file directory (default: WEB_STATIC_DIR/web)")
+    serve_web_parser.set_defaults(func=serve_web_command)
 
     return parser
 
