@@ -5,7 +5,11 @@ from ok_web.server import run_web_server
 
 
 def _resolve_port(default: int = 10086) -> int:
-    value = os.getenv("PORT", os.getenv("WEB_PORT", str(default)))
+    value = os.getenv("PORT")
+    if value is None:
+        value = os.getenv("WEB_PORT")
+    if value is None:
+        value = str(default)
     try:
         return int(value)
     except (TypeError, ValueError) as exc:

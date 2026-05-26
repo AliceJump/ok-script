@@ -5,7 +5,13 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 class WebStaticHandler(SimpleHTTPRequestHandler):
     def send_error(self, code, message=None, explain=None):
-        if code == HTTPStatus.NOT_FOUND and getattr(self, "command", "") == "GET":
+        index_path = os.path.join(self.directory, "index.html")
+        if (
+            code == HTTPStatus.NOT_FOUND
+            and self.command == "GET"
+            and self.path != "/index.html"
+            and os.path.isfile(index_path)
+        ):
             self.path = "/index.html"
             return super().do_GET()
         return super().send_error(code, message, explain)
