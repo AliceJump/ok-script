@@ -1,3 +1,3 @@
-from ok_web.server import run_web_server
+from ok_web.server import create_web_server, run_web_server
 
-__all__ = ["run_web_server"]
+__all__ = ["create_web_server", "run_web_server"]

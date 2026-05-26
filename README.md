@@ -72,10 +72,22 @@ python -m ok_web --host 0.0.0.0 --port 10086 --static-dir web
 
 ### 4) 健康检查
 
-* `GET /health` -> `{"status": "ok"}`
+* `GET /health` -> `{"status": "ok", "service": "ok_web", "runtime": {...}}`
+* `GET /runtime/state` -> 查看当前运行态（`idle/starting/running/stopping/error`）
+* `POST /runtime/start` -> 启动运行态
+* `POST /runtime/stop` -> 停止运行态
+* `GET /tasks` -> 查看内置任务列表
+* `POST /tasks/{id}/run` -> 触发指定任务（要求 runtime 已启动）
+* `GET /config` / `PUT /config` -> 读取/更新 Web 配置
+* `GET /logs` -> 查看最近运行事件日志
 * `GET /` -> 返回 `index.html`
 
-### 5) 反向代理建议
+### 5) 可选配置文件
+
+可通过环境变量 `WEB_CONFIG_PATH` 或参数 `--config-path` 指定 JSON 配置文件路径。  
+配置按 “默认值 < 文件值 < 环境变量 < 运行时 PUT /config 覆盖” 合并。
+
+### 6) 反向代理建议
 
 建议由 Nginx/Caddy 反向代理到 `http://127.0.0.1:10086`，并在代理层处理 HTTPS、域名和缓存策略。
 

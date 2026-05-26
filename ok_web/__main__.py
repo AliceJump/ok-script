@@ -30,12 +30,17 @@ def build_parser():
         default=os.getenv("WEB_STATIC_DIR", "web"),
         help="Static file directory (default: WEB_STATIC_DIR/web)",
     )
+    parser.add_argument(
+        "--config-path",
+        default=os.getenv("WEB_CONFIG_PATH"),
+        help="Optional JSON config path (default: WEB_CONFIG_PATH)",
+    )
     return parser
 
 
 def main():
     args = build_parser().parse_args()
-    run_web_server(host=args.host, port=args.port, static_dir=args.static_dir)
+    run_web_server(host=args.host, port=args.port, static_dir=args.static_dir, config_path=args.config_path)
 
 
 if __name__ == "__main__":

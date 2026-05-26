@@ -4,9 +4,176 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ok-script web</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+      background: #0b1020;
+      color: #e7ecf5;
+    }
+    .shell {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .header, .panel, .nav {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+    }
+    .header, .nav {
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .nav {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .nav a, button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: #3b82f6;
+      color: white;
+      cursor: pointer;
+      text-decoration: none;
+      font: inherit;
+    }
+    .nav a.secondary, button.secondary {
+      background: #334155;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .panel {
+      padding: 16px 20px;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+    }
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .muted {
+      color: #b9c4d8;
+    }
+  </style>
 </head>
 <body>
-<h1>ok-script Web Frontend</h1>
-<p>Frontend static hosting is running. Replace files in this directory with your built frontend assets.</p>
+<div class="shell">
+  <section class="header">
+    <h1>ok-script WebShell</h1>
+    <p class="muted">基于桌面端清单落地的最小 Web 壳：运行态、任务、配置、日志与静态托管。</p>
+  </section>
+
+  <nav class="nav">
+    <button id="startBtn">启动 Runtime</button>
+    <button id="stopBtn" class="secondary">停止 Runtime</button>
+    <button id="refreshBtn" class="secondary">刷新状态</button>
+    <a href="/health" target="_blank" rel="noreferrer">Health</a>
+    <a href="/runtime/state" target="_blank" rel="noreferrer">Runtime API</a>
+    <a href="/tasks" target="_blank" rel="noreferrer">Tasks API</a>
+    <a href="/config" target="_blank" rel="noreferrer">Config API</a>
+    <a href="/logs" target="_blank" rel="noreferrer">Logs API</a>
+  </nav>
+
+  <section class="grid">
+    <article class="panel">
+      <h2>Start</h2>
+      <pre id="runtimeState">loading...</pre>
+    </article>
+
+    <article class="panel">
+      <h2>Tasks</h2>
+      <ul id="taskList"></ul>
+    </article>
+
+    <article class="panel">
+      <h2>Settings</h2>
+      <pre id="configView">loading...</pre>
+    </article>
+
+    <article class="panel">
+      <h2>Debug / Logs</h2>
+      <pre id="logView">loading...</pre>
+    </article>
+  </section>
+</div>
+
+<script>
+  async function request(path, options) {
+    const response = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+    const text = await response.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+    if (!response.ok) {
+      throw new Error(data.error || `Request failed: ${response.status}`);
+    }
+    return data;
+  }
+
+  async function refresh() {
+    const [runtime, tasks, config, logs] = await Promise.all([
+      request("/runtime/state"),
+      request("/tasks"),
+      request("/config"),
+      request("/logs"),
+    ]);
+
+    document.getElementById("runtimeState").textContent = JSON.stringify(runtime, null, 2);
+    document.getElementById("configView").textContent = JSON.stringify(config, null, 2);
+    document.getElementById("logView").textContent = JSON.stringify(logs.items, null, 2);
+
+    const taskList = document.getElementById("taskList");
+    taskList.innerHTML = "";
+    for (const task of tasks.items) {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.textContent = `运行 ${task.name}`;
+      button.className = "secondary";
+      button.onclick = async () => {
+        try {
+          await request(`/tasks/${task.id}/run`, { method: "POST" });
+          await refresh();
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+      item.textContent = `${task.name} [${task.mode}] - ${task.status} `;
+      item.appendChild(button);
+      taskList.appendChild(item);
+    }
+  }
+
+  document.getElementById("startBtn").onclick = async () => {
+    await request("/runtime/start", { method: "POST" });
+    await refresh();
+  };
+  document.getElementById("stopBtn").onclick = async () => {
+    await request("/runtime/stop", { method: "POST" });
+    await refresh();
+  };
+  document.getElementById("refreshBtn").onclick = refresh;
+
+  refresh().catch((error) => {
+    document.getElementById("runtimeState").textContent = error.message;
+  });
+</script>
 </body>
 </html>
