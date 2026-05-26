@@ -7,13 +7,6 @@ import sys
 DEFAULT_CONFIG_TARGETS = ("src.config:config", "config:config")
 
 
-def _port_type(value):
-    port = int(value)
-    if port < 1 or port > 65535:
-        raise argparse.ArgumentTypeError("Port must be in range 1-65535")
-    return port
-
-
 def _split_target(target):
     if ":" in target:
         module_name, attr_name = target.split(":", 1)
@@ -59,13 +52,6 @@ def run_task_command(args):
     return 0
 
 
-def deploy_web_command(args):
-    from ok.web import serve_frontend
-
-    serve_frontend(path=args.path, host=args.host, port=args.port)
-    return 0
-
-
 def build_parser():
     parser = argparse.ArgumentParser(prog="ok")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -80,25 +66,6 @@ def build_parser():
         help="Config import target, for example src.config:config or config:config",
     )
     run_task_parser.set_defaults(func=run_task_command)
-
-    deploy_web_parser = subparsers.add_parser("deploy_web", help="Deploy frontend static files to web")
-    deploy_web_parser.add_argument(
-        "--path",
-        default=".",
-        help="Frontend static files directory (default: current directory)",
-    )
-    deploy_web_parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Bind host (default: 127.0.0.1)",
-    )
-    deploy_web_parser.add_argument(
-        "--port",
-        type=_port_type,
-        default=10086,
-        help="Bind port (default: 10086)",
-    )
-    deploy_web_parser.set_defaults(func=deploy_web_command)
 
     return parser
 

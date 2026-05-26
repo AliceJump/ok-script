@@ -38,9 +38,14 @@ pip install ok-script
 compile_i18n.cmd
 ```
 
-* 部署现有前端页面到 Web（默认端口 10086）
-```commandline
-ok deploy_web --path ./dist
+* 软件启动时自动部署前端页面到 Web（默认端口 10086）
+```python
+config = {
+  "browser": {
+    "frontend_path": "./dist",
+    "port": 10086
+  }
+}
 ```
 
 ## 文档和示例代码

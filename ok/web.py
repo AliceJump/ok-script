@@ -1,6 +1,7 @@
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import threading
 
 
 def _resolve_frontend_path(path):
@@ -12,17 +13,35 @@ def _resolve_frontend_path(path):
     return frontend_path
 
 
-def serve_frontend(path=".", host="127.0.0.1", port=10086):
+def get_frontend_url(host, port):
+    url_host = "127.0.0.1" if host == "0.0.0.0" else host
+    return f"http://{url_host}:{port}"
+
+
+def create_frontend_server(path=".", host="127.0.0.1", port=10086):
     frontend_path = _resolve_frontend_path(path)
     handler = partial(SimpleHTTPRequestHandler, directory=str(frontend_path))
-    access_host = "127.0.0.1" if host == "0.0.0.0" else host
     try:
-        with ThreadingHTTPServer((host, port), handler) as server:
-            print(f"Serving frontend: {frontend_path}")
-            print(f"URL: http://{access_host}:{port}")
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                pass
+        server = ThreadingHTTPServer((host, port), handler)
     except OSError as e:
-        raise RuntimeError(f"Failed to start web server on {host}:{port}: {e}") from e
+        raise RuntimeError(f"Failed to start web server on {host}:{port}. The port may already be in use: {e}") from e
+    return server, frontend_path
+
+
+def start_frontend_server(path=".", host="127.0.0.1", port=10086):
+    server, frontend_path = create_frontend_server(path=path, host=host, port=port)
+    thread = threading.Thread(target=server.serve_forever, name="FrontendWebServer", daemon=True)
+    thread.start()
+    return server, thread, frontend_path, get_frontend_url(host, port)
+
+
+def serve_frontend(path=".", host="127.0.0.1", port=10086):
+    server, frontend_path = create_frontend_server(path=path, host=host, port=port)
+    print(f"Serving frontend: {frontend_path}")
+    print(f"URL: {get_frontend_url(host, port)}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()

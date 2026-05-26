@@ -44,6 +44,7 @@ from ok.feature.Box import Box, find_boxes_by_name, relative_box, crop_image, av
 from ok.task.exceptions import CannotFindException, TaskDisabledException, FinishedException, WaitFailedException, \
     CaptureException
 from ok.util.collection import safe_get
+from ok.web import start_frontend_server
 
 from ok.util.color import find_color_rectangles, mask_white, find_color_rectangles, color_range_to_bound, \
     calculate_color_percentage, get_mask_in_color_range, is_pure_black
@@ -363,6 +364,8 @@ class OK:
         self.task_executor = None
         self._app = None
         self._headless_app = None
+        self.frontend_server = None
+        self.frontend_server_thread = None
         self.debug = config['debug']
         self.global_config = GlobalConfig(config.get('global_configs'))
         windows_config = config.get('windows')
@@ -391,6 +394,7 @@ class OK:
         except Exception as e:
             logger.error(f'SetProcessDpiAwareness error', e)
         self.config = config
+        self.startup_deploy_frontend()
         try:
             self.do_init()
         except Exception as e:
@@ -412,6 +416,22 @@ class OK:
 
     def should_init_task_manager_headless(self):
         return not self.config.get("use_gui") or self.args.get('headless', False)
+
+    def startup_deploy_frontend(self):
+        browser_config = self.config.get('browser')
+        if not browser_config:
+            return
+        frontend_path = browser_config.get('frontend_path')
+        if not frontend_path:
+            return
+        host = browser_config.get('host', '127.0.0.1')
+        port = browser_config.get('port', 10086)
+        self.frontend_server, self.frontend_server_thread, deployed_path, url = start_frontend_server(
+            path=frontend_path, host=host, port=port
+        )
+        if not browser_config.get('url'):
+            browser_config['url'] = url
+        logger.info(f"Frontend deployed on startup: {deployed_path}, url={url}")
 
     def start(self):
         logger.info(f'OK start id:{id(self)} pid:{os.getpid()}')
@@ -691,6 +711,14 @@ class OK:
     def quit(self):
         logger.info('quit app')
         self.exit_event.set()
+        if self.frontend_server is not None:
+            try:
+                self.frontend_server.shutdown()
+                self.frontend_server.server_close()
+            except Exception as e:
+                logger.warning(f'Failed to stop frontend web server: {e}')
+            self.frontend_server = None
+            self.frontend_server_thread = None
         if self._app:
             self._app.quit()
         if self._headless_app:
