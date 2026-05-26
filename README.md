@@ -41,7 +41,7 @@ compile_i18n.cmd
 ## Web 部署（前端静态托管）
 
 当前仓库主要是 Windows/PySide 桌面端代码，不包含现成的前端构建产物目录。  
-已提供最小 Web 托管入口，可用于部署你已有的前端产物。
+已提供最小 Web 托管入口（`python -m ok_web`），可用于部署你已有的前端产物。
 
 ### 1) 依赖拆分
 
@@ -56,13 +56,13 @@ compile_i18n.cmd
 ### 3) 启动服务（默认端口 10086）
 
 ```commandline
-ok serve_web
+python -m ok_web
 ```
 
 可选参数：
 
 ```commandline
-ok serve_web --host 0.0.0.0 --port 10086 --static-dir web
+python -m ok_web --host 0.0.0.0 --port 10086 --static-dir web
 ```
 
 环境变量覆盖：
