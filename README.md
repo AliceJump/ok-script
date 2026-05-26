@@ -38,6 +38,11 @@ pip install ok-script
 compile_i18n.cmd
 ```
 
+* 部署现有前端页面到 Web（默认端口 10086）
+```commandline
+ok deploy_web --path ./dist
+```
+
 ## 文档和示例代码
 
 * [游戏自动化入门](docs/intro_to_automation/README.md)

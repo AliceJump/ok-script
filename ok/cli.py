@@ -52,6 +52,15 @@ def run_task_command(args):
     return 0
 
 
+def deploy_web_command(args):
+    if args.port < 1 or args.port > 65535:
+        raise ValueError("Port must be between 1 and 65535")
+
+    from ok.web import serve_frontend
+
+    return serve_frontend(path=args.path, host=args.host, port=args.port)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="ok")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -66,6 +75,25 @@ def build_parser():
         help="Config import target, for example src.config:config or config:config",
     )
     run_task_parser.set_defaults(func=run_task_command)
+
+    deploy_web_parser = subparsers.add_parser("deploy_web", help="Deploy frontend static files to web")
+    deploy_web_parser.add_argument(
+        "--path",
+        default=".",
+        help="Frontend static files directory (default: current directory)",
+    )
+    deploy_web_parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Bind host (default: 0.0.0.0)",
+    )
+    deploy_web_parser.add_argument(
+        "--port",
+        type=int,
+        default=10086,
+        help="Bind port (default: 10086)",
+    )
+    deploy_web_parser.set_defaults(func=deploy_web_command)
 
     return parser
 
