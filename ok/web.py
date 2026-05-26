@@ -3,6 +3,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import threading
 
+LOCALHOST = "127.0.0.1"
+ALL_INTERFACES = "0.0.0.0"
+
 
 def _resolve_frontend_path(path):
     frontend_path = Path(path).expanduser().resolve()
@@ -14,11 +17,11 @@ def _resolve_frontend_path(path):
 
 
 def get_frontend_url(host, port):
-    url_host = "127.0.0.1" if host == "0.0.0.0" else host
+    url_host = LOCALHOST if host == ALL_INTERFACES else host
     return f"http://{url_host}:{port}"
 
 
-def create_frontend_server(path=".", host="127.0.0.1", port=10086):
+def create_frontend_server(path=".", host=LOCALHOST, port=10086):
     frontend_path = _resolve_frontend_path(path)
     handler = partial(SimpleHTTPRequestHandler, directory=str(frontend_path))
     try:
@@ -28,14 +31,14 @@ def create_frontend_server(path=".", host="127.0.0.1", port=10086):
     return server, frontend_path
 
 
-def start_frontend_server(path=".", host="127.0.0.1", port=10086):
+def start_frontend_server(path=".", host=LOCALHOST, port=10086):
     server, frontend_path = create_frontend_server(path=path, host=host, port=port)
     thread = threading.Thread(target=server.serve_forever, name="FrontendWebServer", daemon=True)
     thread.start()
     return server, thread, frontend_path, get_frontend_url(host, port)
 
 
-def serve_frontend(path=".", host="127.0.0.1", port=10086):
+def serve_frontend(path=".", host=LOCALHOST, port=10086):
     server, frontend_path = create_frontend_server(path=path, host=host, port=port)
     print(f"Serving frontend: {frontend_path}")
     print(f"URL: {get_frontend_url(host, port)}")

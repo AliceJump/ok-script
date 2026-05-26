@@ -426,12 +426,15 @@ class OK:
             return
         host = browser_config.get('host', '127.0.0.1')
         port = browser_config.get('port', 10086)
-        self.frontend_server, self.frontend_server_thread, deployed_path, url = start_frontend_server(
-            path=frontend_path, host=host, port=port
-        )
-        if not browser_config.get('url'):
-            browser_config['url'] = url
-        logger.info(f"Frontend deployed on startup: {deployed_path}, url={url}")
+        try:
+            self.frontend_server, self.frontend_server_thread, deployed_path, url = start_frontend_server(
+                path=frontend_path, host=host, port=port
+            )
+            if not browser_config.get('url'):
+                browser_config['url'] = url
+            logger.info(f"Frontend deployed on startup: {deployed_path}, url={url}")
+        except Exception as e:
+            logger.error(f"Frontend startup deployment failed: {e}")
 
     def start(self):
         logger.info(f'OK start id:{id(self)} pid:{os.getpid()}')
@@ -715,6 +718,8 @@ class OK:
             try:
                 self.frontend_server.shutdown()
                 self.frontend_server.server_close()
+                if self.frontend_server_thread is not None:
+                    self.frontend_server_thread.join(timeout=2)
             except Exception as e:
                 logger.warning(f'Failed to stop frontend web server: {e}')
             self.frontend_server = None
