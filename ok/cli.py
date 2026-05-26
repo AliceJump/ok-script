@@ -7,6 +7,13 @@ import sys
 DEFAULT_CONFIG_TARGETS = ("src.config:config", "config:config")
 
 
+def _port_type(value):
+    port = int(value)
+    if port < 1 or port > 65535:
+        raise argparse.ArgumentTypeError("Port must be in range 1-65535")
+    return port
+
+
 def _split_target(target):
     if ":" in target:
         module_name, attr_name = target.split(":", 1)
@@ -53,12 +60,10 @@ def run_task_command(args):
 
 
 def deploy_web_command(args):
-    if args.port < 1 or args.port > 65535:
-        raise ValueError("Port must be between 1 and 65535")
-
     from ok.web import serve_frontend
 
-    return serve_frontend(path=args.path, host=args.host, port=args.port)
+    serve_frontend(path=args.path, host=args.host, port=args.port)
+    return 0
 
 
 def build_parser():
@@ -84,12 +89,12 @@ def build_parser():
     )
     deploy_web_parser.add_argument(
         "--host",
-        default="0.0.0.0",
-        help="Bind host (default: 0.0.0.0)",
+        default="127.0.0.1",
+        help="Bind host (default: 127.0.0.1)",
     )
     deploy_web_parser.add_argument(
         "--port",
-        type=int,
+        type=_port_type,
         default=10086,
         help="Bind port (default: 10086)",
     )

@@ -12,14 +12,17 @@ def _resolve_frontend_path(path):
     return frontend_path
 
 
-def serve_frontend(path=".", host="0.0.0.0", port=10086):
+def serve_frontend(path=".", host="127.0.0.1", port=10086):
     frontend_path = _resolve_frontend_path(path)
     handler = partial(SimpleHTTPRequestHandler, directory=str(frontend_path))
-    with ThreadingHTTPServer((host, port), handler) as server:
-        print(f"Serving frontend: {frontend_path}")
-        print(f"URL: http://{host}:{port}")
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
-    return 0
+    access_host = "127.0.0.1" if host == "0.0.0.0" else host
+    try:
+        with ThreadingHTTPServer((host, port), handler) as server:
+            print(f"Serving frontend: {frontend_path}")
+            print(f"URL: http://{access_host}:{port}")
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+    except OSError as e:
+        raise RuntimeError(f"Failed to start web server on {host}:{port}: {e}") from e
