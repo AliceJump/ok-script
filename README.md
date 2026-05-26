@@ -72,7 +72,7 @@ python -m ok_web --host 0.0.0.0 --port 10086 --static-dir web
 
 ### 4) 健康检查
 
-* `GET /health` -> `{"status":"ok"}`
+* `GET /health` -> `{"status": "ok"}`
 * `GET /` -> 返回 `index.html`
 
 ### 5) 反向代理建议

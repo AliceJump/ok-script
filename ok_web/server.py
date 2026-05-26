@@ -3,10 +3,13 @@ import os
 from functools import partial
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-
-
 class WebStaticHandler(SimpleHTTPRequestHandler):
+    def send_error(self, code, message=None, explain=None):
+        if code == HTTPStatus.NOT_FOUND and getattr(self, "command", "") == "GET":
+            self.path = "/index.html"
+            return super().do_GET()
+        return super().send_error(code, message, explain)
+
     def do_GET(self):
         if self.path == "/health":
             body = json.dumps({"status": "ok"}).encode("utf-8")
@@ -21,13 +24,11 @@ class WebStaticHandler(SimpleHTTPRequestHandler):
             self.path = "/index.html"
             return super().do_GET()
 
-        full_path = Path(self.directory) / self.path.lstrip("/")
-        if not full_path.exists():
-            self.path = "/index.html"
         return super().do_GET()
 
 
 def run_web_server(host: str = "0.0.0.0", port: int = 10086, static_dir: str = "web"):
+    from pathlib import Path
     resolved_static_dir = Path(static_dir).resolve()
     if not resolved_static_dir.exists() or not resolved_static_dir.is_dir():
         raise FileNotFoundError(f"Static directory not found: {resolved_static_dir}")
