@@ -3,6 +3,7 @@ import os
 from functools import partial
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 class WebStaticHandler(SimpleHTTPRequestHandler):
     def send_error(self, code, message=None, explain=None):
         index_path = os.path.join(self.directory, "index.html")
@@ -34,7 +35,6 @@ class WebStaticHandler(SimpleHTTPRequestHandler):
 
 
 def run_web_server(host: str = "0.0.0.0", port: int = 10086, static_dir: str = "web"):
-    from pathlib import Path
     resolved_static_dir = Path(static_dir).resolve()
     if not resolved_static_dir.exists() or not resolved_static_dir.is_dir():
         raise FileNotFoundError(f"Static directory not found: {resolved_static_dir}")
