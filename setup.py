@@ -1,6 +1,7 @@
 import os
 import setuptools
 import sys
+from packaging.version import Version
 from get_pypi_latest_version import GetPyPiLatestVersion
 
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -13,7 +14,8 @@ UPSTREAM_MODULE_NAME = "ok-script"
 obtainer = GetPyPiLatestVersion()
 latest_version = obtainer(UPSTREAM_MODULE_NAME)
 
-VERSION_NUM = obtainer.version_post(latest_version, post=1)
+parsed_version = Version(latest_version)
+VERSION_NUM = f"{parsed_version.major}.{parsed_version.minor}.{parsed_version.micro}.post1"
 print(f'latest_version is {latest_version} new version is {VERSION_NUM}')
 
 setuptools.setup(
