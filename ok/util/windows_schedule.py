@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Callable
+from xml.sax.saxutils import escape
 
 from ok.util.config import Config
 
@@ -85,8 +86,8 @@ class WindowsScheduleCache:
         Args:
             cache_dir: 缓存目录，默认使用 Config.config_folder
         """
-        self.config = config or Config()
-        default_cache_dir = self.config.get("config_folder", "configs")
+        self.config = config
+        default_cache_dir = self.config.get("config_folder", "configs") if self.config else Config.config_folder
         self.cache_dir = Path(default_cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_file = self.cache_dir / "schedule_tasks_cache.json"
@@ -181,6 +182,12 @@ class WindowsScheduleCache:
             self.cache.clear()
             self.save_cache()
 
+    def replace_all(self, tasks: List[ScheduleTaskInfo]):
+        """批量替换缓存内容，并只写入一次文件。"""
+        with self.lock:
+            self.cache = {self._cache_key(task): task for task in tasks}
+            self.save_cache()
+
     def _cache_key(self, task_info: ScheduleTaskInfo) -> str:
         return task_info.path or task_info.name
 
@@ -210,12 +217,14 @@ class WindowsScheduleManager:
         self.running = False
         self.sync_thread: Optional[threading.Thread] = None
         self.update_callbacks: List[Callable] = []
+        self._com_thread_state = threading.local()
 
         self._init_com_service()
 
     def _init_com_service(self):
         """初始化 COM 服务"""
         try:
+            self._ensure_com_initialized()
             import win32com.client
 
             self.SCHEDULE_SERVICE = win32com.client.Dispatch("Schedule.Service")
@@ -234,6 +243,21 @@ class WindowsScheduleManager:
         except Exception as e:
             logger.warning(f"Failed to initialize COM service: {e}, will use schtasks command")
             self.SCHEDULE_SERVICE = None
+
+    def _ensure_com_initialized(self):
+        """确保当前线程初始化 COM，避免后台刷新线程复用 COM 时失败。"""
+        if getattr(self._com_thread_state, "initialized", False):
+            return
+
+        try:
+            import pythoncom
+
+            pythoncom.CoInitialize()
+            self._com_thread_state.initialized = True
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"COM thread initialization skipped: {e}")
 
     def is_com_available(self) -> bool:
         """检查 COM 服务是否可用"""
@@ -274,6 +298,8 @@ class WindowsScheduleManager:
             if not force_sync:
                 return self.cache.get_all()
 
+            self._ensure_com_initialized()
+
             tasks = []
             try:
                 if self.is_com_available():
@@ -286,9 +312,7 @@ class WindowsScheduleManager:
                 return self.cache.get_all()
 
             # 更新缓存
-            self.cache.clear()
-            for task_info in tasks:
-                self.cache.add_or_update(task_info)
+            self.cache.replace_all(tasks)
 
             return tasks
 
@@ -776,7 +800,7 @@ class WindowsScheduleManager:
                 return self._create_task_via_schtasks(
                     task_name, task_index, trigger_type, enabled, task_path,
                     timeout_hours, start_hour, start_minute, auto_exit,
-                    interval_days, interval_hours)
+                    interval_days, interval_hours, description)
 
             # 生成 XML 配置
             xml_config = self._generate_task_xml(
@@ -819,7 +843,7 @@ class WindowsScheduleManager:
             return self._create_task_via_schtasks(
                 task_name, task_index, trigger_type, enabled,
                 task_path, timeout_hours, start_hour, start_minute,
-                auto_exit, interval_days, interval_hours)
+                auto_exit, interval_days, interval_hours, description)
 
     def _create_task_via_schtasks(self, task_name: str, task_index: int,
                                   trigger_type: TriggerType, enabled: bool,
@@ -984,15 +1008,17 @@ class WindowsScheduleManager:
         """
         import sys
 
-        python_exe = str(Path(sys.executable).resolve())
-        working_directory = os.getcwd()
+        python_exe = self._xml_text(str(Path(sys.executable).resolve()))
+        working_directory = self._xml_text(os.getcwd())
 
-        current_user = self._resolve_current_user_id()
+        current_user = self._xml_text(self._resolve_current_user_id())
 
         # 构建命令行参数
         cmd_args = f"-t {task_index}"
         if auto_exit:
             cmd_args += " -e"
+        cmd_args = self._xml_text(f"main.py {cmd_args}")
+        description = self._xml_text(description)
 
         timeout_str = ""
         if timeout_hours > 0:
@@ -1057,12 +1083,16 @@ class WindowsScheduleManager:
   <Actions Context="Author">
     <Exec>
             <Command>{python_exe}</Command>
-      <Arguments>main.py {cmd_args}</Arguments>
+      <Arguments>{cmd_args}</Arguments>
       <WorkingDirectory>{working_directory}</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>"""
         return xml_template
+
+    def _xml_text(self, value: object) -> str:
+        """转义 XML 文本节点内容。"""
+        return escape(str(value or ""))
 
     def _get_trigger_xml(self, trigger_type: TriggerType, start_boundary: str,
                          interval_days: int = 0, interval_hours: int = 0) -> str:

@@ -1156,14 +1156,10 @@ class ScheduleTaskTab(Tab):
         try:
             current = self.schedule_manager.cache.get(task_name)
             enabled = current.enabled if current else True
-
-            deleted = self.schedule_manager.delete_task(task_name)
-            if not deleted:
-                self.show_error(self.tr("Failed to modify task: cannot delete old task"))
-                return
+            display_name = current.name if current else task_name
 
             success = self.schedule_manager.create_task(
-                task_name=current.name if current else task_name,
+                task_name=display_name,
                 task_index=task_index,
                 trigger_type=trigger_type,
                 timeout_hours=timeout_hours,
@@ -1174,11 +1170,17 @@ class ScheduleTaskTab(Tab):
                 interval_days=interval_days,
                 interval_hours=interval_hours,
             )
-            if success:
+            if not success:
+                self.show_error(self.tr("Failed to modify task"))
                 self.load_tasks()
+                return
+
+            deleted = self.schedule_manager.delete_task(task_name)
+            self.load_tasks()
+            if deleted:
                 self.show_success(self.tr("Task modified successfully"))
             else:
-                self.show_error(self.tr("Failed to modify task"))
+                self.show_error(self.tr("Task modified, but failed to delete old task"))
         except Exception as e:
             logger.error(f"Failed to modify task: {e}")
             self.show_error(self.tr("Failed to modify task") + f": {e}")
@@ -1294,14 +1296,23 @@ class ScheduleTaskTab(Tab):
         """切换任务启用状态"""
         try:
             if enabled:
-                self.schedule_manager.enable_task(task_name)
-                self.show_success(self.tr("Task enabled"))
+                success = self.schedule_manager.enable_task(task_name)
+                if success:
+                    self.show_success(self.tr("Task enabled"))
+                else:
+                    self.show_error(self.tr("Failed to toggle task"))
+                    self.load_tasks()
             else:
-                self.schedule_manager.disable_task(task_name)
-                self.show_success(self.tr("Task disabled"))
+                success = self.schedule_manager.disable_task(task_name)
+                if success:
+                    self.show_success(self.tr("Task disabled"))
+                else:
+                    self.show_error(self.tr("Failed to toggle task"))
+                    self.load_tasks()
         except Exception as e:
             logger.error(f"Failed to toggle task: {e}")
             self.show_error(self.tr("Failed to toggle task") + f": {e}")
+            self.load_tasks()
 
     def show_success(self, message: str):
         """显示成功消息"""
