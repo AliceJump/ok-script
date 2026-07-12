@@ -17,3 +17,7 @@ class GetPyPiLatestVersion:
             minor += 1
             micro = 0
         return f"{major}.{minor}.{micro}"
+
+    def version_post(self, version, post=1):
+        parsed = Version(version)
+        return f"{parsed.major}.{parsed.minor}.{parsed.micro}.post{post}"

@@ -7,12 +7,13 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-MODULE_NAME = "ok-script"
+MODULE_NAME = "ok-script-aj-patch"
+UPSTREAM_MODULE_NAME = "ok-script"
 
 obtainer = GetPyPiLatestVersion()
-latest_version = obtainer(MODULE_NAME)
+latest_version = obtainer(UPSTREAM_MODULE_NAME)
 
-VERSION_NUM = obtainer.version_add_one(latest_version, add_patch=True)
+VERSION_NUM = obtainer.version_post(latest_version, post=1)
 print(f'latest_version is {latest_version} new version is {VERSION_NUM}')
 
 setuptools.setup(
