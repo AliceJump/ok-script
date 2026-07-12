@@ -208,10 +208,12 @@ class AnnotationCanvas(QWidget):
     """
 
     annotations_changed = Signal()
+    image_changed = Signal(bool)
 
     MODE_NONE = 0
     MODE_DRAW = 1
     MODE_DELETE = 2
+    MODE_GREEN_PAINT = 3
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -248,6 +250,12 @@ class AnnotationCanvas(QWidget):
         self.pan_start_pos = None        # widget coords
         self.pan_start_offset = None     # (offset_x, offset_y) at drag start
 
+        # Green mask painting state
+        self.green_painting = False
+        self.green_last_pos = None       # widget coords
+        self.green_brush_size = 16       # image pixels
+        self.image_dirty = False
+
         # Current mouse color info
         self._current_color_text = ""
         self._category_name_to_id: dict[str, int] = {}
@@ -271,6 +279,10 @@ class AnnotationCanvas(QWidget):
         self.dragging = False
         self.resizing = False
         self.panning = False
+        self.green_painting = False
+        self.green_last_pos = None
+        self.image_dirty = False
+        self.image_changed.emit(False)
         self._current_color_text = ""
         self._recalc_fit_scale()
         self.scale = self._fit_scale
@@ -356,6 +368,32 @@ class AnnotationCanvas(QWidget):
         if self.scale == 0:
             return wx, wy
         return (wx - self.offset_x) / self.scale, (wy - self.offset_y) / self.scale
+
+    def set_green_brush_size(self, size):
+        self.green_brush_size = max(1, int(size))
+
+    def _paint_green(self, start_pos, end_pos):
+        if not self.pixmap or self.pixmap.isNull():
+            return False
+
+        sx, sy = self._widget_to_img(start_pos.x(), start_pos.y())
+        ex, ey = self._widget_to_img(end_pos.x(), end_pos.y())
+        if ((ex < 0 or ey < 0 or ex >= self.pixmap.width() or ey >= self.pixmap.height()) and
+                (sx < 0 or sy < 0 or sx >= self.pixmap.width() or sy >= self.pixmap.height())):
+            return False
+
+        painter = QPainter(self.pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(0, 255, 0), self.green_brush_size, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(QPoint(int(round(sx)), int(round(sy))), QPoint(int(round(ex)), int(round(ey))))
+        painter.end()
+
+        self._image = self.pixmap.toImage()
+        self.image_dirty = True
+        self.image_changed.emit(True)
+        self.update()
+        return True
 
     def _ann_widget_rect(self, ann):
         """Get QRect in widget coordinates for an annotation (image-space coords)."""
@@ -527,6 +565,11 @@ class AnnotationCanvas(QWidget):
                 if idx >= 0:
                     self.selected_ann_index = idx
                     self.delete_selected()
+            elif self.mode == self.MODE_GREEN_PAINT:
+                event.accept()
+                self.green_painting = True
+                self.green_last_pos = pos
+                self._paint_green(pos, pos)
             else:
                 # Check for resize handle first
                 idx, handle = self._find_handle_at(pos)
@@ -591,6 +634,12 @@ class AnnotationCanvas(QWidget):
             if self.draw_start is not None:
                 self.draw_preview = pos
                 self.update()
+        elif self.mode == self.MODE_GREEN_PAINT:
+            event.accept()
+            self.setCursor(Qt.CrossCursor)
+            if self.green_painting and self.green_last_pos is not None:
+                if self._paint_green(self.green_last_pos, pos):
+                    self.green_last_pos = pos
         elif self.resizing and self.selected_ann_index >= 0 and self.resize_start_pos:
             self._do_resize(pos)
             self.update()
@@ -664,6 +713,8 @@ class AnnotationCanvas(QWidget):
                         self.hovered_ann_index = -1
                         self.hovered_handle = HANDLE_NONE
                         self.update()
+            elif self.mode == self.MODE_GREEN_PAINT:
+                self.setCursor(Qt.CrossCursor)
 
         super().mouseMoveEvent(event)
 
@@ -718,6 +769,9 @@ class AnnotationCanvas(QWidget):
                 self.setCursor(Qt.OpenHandCursor)
             else:
                 self.setCursor(Qt.ArrowCursor)
+        if self.green_painting:
+            self.green_painting = False
+            self.green_last_pos = None
         super().mouseReleaseEvent(event)
 
     def _do_resize(self, pos):
@@ -947,6 +1001,7 @@ class MarkUpWindow(BaseWindow):
 
         self.image_list = image_list
         self.current_index = 0
+        self.changed_image_paths = set()
         if image_path in image_list:
             self.current_index = image_list.index(image_path)
 
@@ -970,6 +1025,24 @@ class MarkUpWindow(BaseWindow):
         self.delete_box_btn.setCheckable(True)
         self.delete_box_btn.clicked.connect(self.toggle_delete_mode)
         toolbar.addWidget(self.delete_box_btn)
+
+        self.green_paint_btn = PushButton(FluentIcon.EDIT, self.tr("Green (G)"))
+        self.green_paint_btn.setCheckable(True)
+        self.green_paint_btn.clicked.connect(self.toggle_green_paint_mode)
+        toolbar.addWidget(self.green_paint_btn)
+
+        self.green_brush_size = SpinBox(self)
+        self.green_brush_size.setRange(1, 128)
+        self.green_brush_size.setValue(self.canvas.green_brush_size if hasattr(self, 'canvas') else 16)
+        self.green_brush_size.setFixedWidth(90)
+        self.green_brush_size.valueChanged.connect(self.set_green_brush_size)
+        toolbar.addWidget(BodyLabel(self.tr("Brush")))
+        toolbar.addWidget(self.green_brush_size)
+
+        self.save_image_btn = PushButton(FluentIcon.SAVE, self.tr("Save Image"))
+        self.save_image_btn.setEnabled(False)
+        self.save_image_btn.clicked.connect(self.save_current_image)
+        toolbar.addWidget(self.save_image_btn)
 
         self.modify_btn = PushButton(FluentIcon.SETTING, self.tr("Modify (Double Click)"))
         self.modify_btn.clicked.connect(self.modify_selected)
@@ -1013,6 +1086,8 @@ class MarkUpWindow(BaseWindow):
         # Canvas directly in layout (no scroll area — it scales to fit)
         self.canvas = AnnotationCanvas(self)
         self.canvas.annotations_changed.connect(self.on_annotations_changed)
+        self.canvas.image_changed.connect(self.on_image_changed)
+        self.green_brush_size.setValue(self.canvas.green_brush_size)
         content_layout.addWidget(self.canvas, 1)
 
         # Right arrow - icon-only ToolButton, vertically centered
@@ -1114,9 +1189,33 @@ class MarkUpWindow(BaseWindow):
                 "background-color: transparent; border: 1px solid gray; border-radius: 2px;"
             )
 
+    def on_image_changed(self, dirty):
+        self.save_image_btn.setEnabled(bool(dirty))
+
+    def set_green_brush_size(self, size):
+        if hasattr(self, 'canvas'):
+            self.canvas.set_green_brush_size(size)
+
+    def save_current_image(self):
+        if not self.image_list or not self.canvas.pixmap or self.canvas.pixmap.isNull():
+            return
+
+        image_path = self.image_list[self.current_index]
+        if self.canvas.pixmap.save(image_path):
+            self.changed_image_paths.add(image_path)
+            self.canvas.image_dirty = False
+            self.canvas.image_changed.emit(False)
+            from ok.gui.util.Alert import alert_info
+            alert_info(self.tr("Image saved: {}" ).format(os.path.basename(image_path)))
+        else:
+            from ok.gui.util.Alert import alert_error
+            alert_error(self.tr("Image save failed: {e}").format(e=image_path))
+
     def on_annotations_changed(self):
         """Auto-save annotations whenever they change."""
         self.save_annotations()
+        if self.image_list:
+            self.changed_image_paths.add(self.image_list[self.current_index])
 
     def save_annotations(self):
         if not self.image_list:
@@ -1183,6 +1282,7 @@ class MarkUpWindow(BaseWindow):
     def end_draw_mode(self):
         """Called after finishing drawing a box to exit draw mode."""
         self.draw_btn.setChecked(False)
+        self.green_paint_btn.setChecked(False)
         self.canvas.mode = AnnotationCanvas.MODE_NONE
         self.canvas.draw_start = None
         self.canvas.draw_preview = None
@@ -1195,13 +1295,16 @@ class MarkUpWindow(BaseWindow):
     def toggle_draw_mode(self, checked):
         if checked:
             self.delete_box_btn.setChecked(False)
+            self.green_paint_btn.setChecked(False)
             self.canvas.mode = AnnotationCanvas.MODE_DRAW
             self.canvas.dragging = False
             self.canvas.resizing = False
             self.canvas.panning = False
+            self.canvas.green_painting = False
             self.canvas.drag_start_pos = None
             self.canvas.resize_start_pos = None
             self.canvas.pan_start_pos = None
+            self.canvas.green_last_pos = None
             self.canvas.setCursor(Qt.CrossCursor)
         else:
             self.canvas.mode = AnnotationCanvas.MODE_NONE
@@ -1216,13 +1319,16 @@ class MarkUpWindow(BaseWindow):
     def toggle_delete_mode(self, checked):
         if checked:
             self.draw_btn.setChecked(False)
+            self.green_paint_btn.setChecked(False)
             self.canvas.mode = AnnotationCanvas.MODE_DELETE
             self.canvas.dragging = False
             self.canvas.resizing = False
             self.canvas.panning = False
+            self.canvas.green_painting = False
             self.canvas.drag_start_pos = None
             self.canvas.resize_start_pos = None
             self.canvas.pan_start_pos = None
+            self.canvas.green_last_pos = None
             self.canvas.setCursor(Qt.ArrowCursor)
         else:
             self.canvas.mode = AnnotationCanvas.MODE_NONE
@@ -1232,6 +1338,30 @@ class MarkUpWindow(BaseWindow):
                 self.canvas.setCursor(Qt.ArrowCursor)
         self.canvas.draw_start = None
         self.canvas.draw_preview = None
+        self.canvas.update()
+
+    def toggle_green_paint_mode(self, checked):
+        if checked:
+            self.draw_btn.setChecked(False)
+            self.delete_box_btn.setChecked(False)
+            self.canvas.mode = AnnotationCanvas.MODE_GREEN_PAINT
+            self.canvas.dragging = False
+            self.canvas.resizing = False
+            self.canvas.panning = False
+            self.canvas.drag_start_pos = None
+            self.canvas.resize_start_pos = None
+            self.canvas.pan_start_pos = None
+            self.canvas.draw_start = None
+            self.canvas.draw_preview = None
+            self.canvas.setCursor(Qt.CrossCursor)
+        else:
+            self.canvas.mode = AnnotationCanvas.MODE_NONE
+            self.canvas.green_painting = False
+            self.canvas.green_last_pos = None
+            if self.canvas._is_zoomed_beyond_window():
+                self.canvas.setCursor(Qt.OpenHandCursor)
+            else:
+                self.canvas.setCursor(Qt.ArrowCursor)
         self.canvas.update()
 
     def modify_selected(self):
@@ -1250,6 +1380,7 @@ class MarkUpWindow(BaseWindow):
         self.canvas.mode = AnnotationCanvas.MODE_NONE
         self.draw_btn.setChecked(False)
         self.delete_box_btn.setChecked(False)
+        self.green_paint_btn.setChecked(False)
         self.load_current_image()
 
     def _update_nav_buttons(self):
@@ -1265,6 +1396,9 @@ class MarkUpWindow(BaseWindow):
         elif event.key() in (Qt.Key_D, Qt.Key_Delete):
             self.delete_box_btn.setChecked(not self.delete_box_btn.isChecked())
             self.toggle_delete_mode(self.delete_box_btn.isChecked())
+        elif event.key() == Qt.Key_G:
+            self.green_paint_btn.setChecked(not self.green_paint_btn.isChecked())
+            self.toggle_green_paint_mode(self.green_paint_btn.isChecked())
         elif event.key() == Qt.Key_Left:
             self.prev_image()
         elif event.key() == Qt.Key_Right:

@@ -284,6 +284,15 @@ class ImageCard(QFrame):
 
         self.features_label.setText(self._features_text_full)
 
+    def reload_content(self, features_text=""):
+        self._features_text_full = features_text
+        qimg = QImage(self.image_path)
+        if not qimg.isNull():
+            self.original_thumb = qimg.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            self.original_thumb = None
+        self.set_card_width(self.width())
+
     def set_selected(self, selected):
         self.selected = selected
         self._apply_style()
@@ -846,6 +855,14 @@ class TemplateTab(QWidget):
         self.markup_window.show()
 
     def on_markup_closed(self):
+        changed_paths = set(getattr(self.markup_window, 'changed_image_paths', set()))
         self.markup_window = None
-        self.refresh_grid()
+        if not changed_paths:
+            return
+
+        self.coco_data = load_coco()
+        for card in self.image_cards:
+            if card.image_path in changed_paths:
+                cats = get_categories_for_image(self.coco_data, card.image_path)
+                card.reload_content(', '.join(cats))
 
