@@ -272,8 +272,11 @@ def _register_task_xml(path: str, new_xml: str) -> bool:
         task_def = service.NewTask(0)
         task_def.XmlText = new_xml
         folder = service.GetFolder(folder_path or "\\")
+        # logonType 传 0（TASK_LOGON_NONE）：让 Task Scheduler 使用 XML 中的
+        # LogonType，保留原任务的运行身份（Password/S4U 等），避免被强制改为
+        # InteractiveToken
         folder.RegisterTaskDefinition(
-            task_file_name, task_def, _TASK_CREATE_OR_UPDATE, None, None, 3
+            task_file_name, task_def, _TASK_CREATE_OR_UPDATE, None, None, 0
         )
         logger.info(f"schedule index sync: updated task {path} via COM")
         return True
