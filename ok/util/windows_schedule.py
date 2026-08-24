@@ -132,6 +132,42 @@ def format_next_run_time(next_run_time: str) -> str:
     return " ".join(parts[:2])[:16] if len(parts) >= 2 else value[:16]
 
 
+# 匹配命令行 / XML <Arguments> 中的 -t 参数
+# （值可为数字索引或"模块路径.类名"稳定标识；[^\s<] 保证 XML 中也能正确截取）
+TASK_ARG_PATTERN = re.compile(r"(^|\s)-t\s+([^\s<]+)")
+
+
+def extract_task_target(*texts) -> Optional[str]:
+    """从命令行或 XML 文本中提取 -t 的目标值。
+
+    依次检查每段文本，返回第一个匹配到的目标（数字索引或模块路径.类名），
+    全部未命中返回 None。
+    """
+    for text in texts:
+        if not text:
+            continue
+        match = TASK_ARG_PATTERN.search(str(text))
+        if match:
+            return match.group(2).strip()
+    return None
+
+
+def parse_task_target_fields(xml_config: str = "", actions: str = "") -> tuple:
+    """从 XML / actions 文本解析 -t 目标，返回 (task_index, task_identifier)。
+
+    数字目标映射到 task_index；"模块路径.类名" 映射到 task_identifier；
+    其它格式（如历史任务名）无法静态映射，返回默认值 (-1, "")。
+    """
+    target = extract_task_target(actions, xml_config)
+    if not target:
+        return -1, ""
+    if target.isdigit():
+        return int(target), ""
+    if "." in target:
+        return -1, target
+    return -1, ""
+
+
 class WindowsScheduleCache:
     """Windows 任务计划本地缓存管理"""
 
@@ -486,6 +522,11 @@ class WindowsScheduleManager:
             )
             display_name = self._extract_original_name_from_description(description) or name
 
+            # 从 XML / actions 解析 -t 目标，回填 task_index / task_identifier，
+            # 避免强制同步时把缓存中已有的定位信息冲掉
+            parsed_task_index, parsed_task_identifier = parse_task_target_fields(
+                xml_config, actions_desc)
+
             task_info = ScheduleTaskInfo(
                 name=display_name,
                 path=f"{schedule_root_path or self.SCHEDULE_ROOT_PATH}\\{name}",
@@ -508,6 +549,8 @@ class WindowsScheduleManager:
                     else ""
                 ),
                 xml_config=xml_config,
+                task_index=parsed_task_index,
+                task_identifier=parsed_task_identifier,
                 interval_days=interval_days,
                 interval_hours=interval_hours,
                 read_only=(schedule_root_path or self.SCHEDULE_ROOT_PATH) != self.SCHEDULE_ROOT_PATH,
@@ -627,6 +670,9 @@ class WindowsScheduleManager:
 
         status = task_dict.get("Status", "") or task_dict.get("状态", "")
 
+        # 从 XML 解析 -t 目标，回填 task_index / task_identifier
+        parsed_task_index, parsed_task_identifier = parse_task_target_fields(xml_config)
+
         task_info = ScheduleTaskInfo(
             name=display_name,
             path=task_path,
@@ -643,6 +689,8 @@ class WindowsScheduleManager:
             author=task_dict.get("Author", ""),
             description=description,
             xml_config=xml_config,
+            task_index=parsed_task_index,
+            task_identifier=parsed_task_identifier,
             interval_days=interval_days,
             interval_hours=interval_hours,
             read_only=not self._is_own_task_path(task_path),

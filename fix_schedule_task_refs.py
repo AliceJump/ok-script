@@ -18,8 +18,9 @@ ok-script 的 Windows 计划任务通过 `-t N`（1-based 索引）定位 onetim
 1. 加载应用配置，实例化 onetime_tasks（读取每个任务的 name）；
 2. 读取 configs/schedule_tasks_cache.json；
 3. 只处理本应用（如 \\ok-ef\\）下的任务；
-4. 用 name 在当前 onetime_tasks 中查新索引，把 `-t X`（旧索引或历史任务名）
-   改写为新索引，并同步更新缓存 / Windows 计划任务（COM）。
+4. 定位每个 -t 目标对应的当前任务，把 `-t X`（数字索引 / 历史任务名 / 过期
+   模块路径）统一迁移为稳定标识（模块路径.类名），并回填缓存元数据，
+   同步更新缓存 / Windows 计划任务（COM）。
 """
 
 import argparse

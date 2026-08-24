@@ -1068,12 +1068,24 @@ class WebRuntime:
         if task_index not in available_indices:
             raise ValueError("Invalid scheduled task")
         trigger = normalize_trigger_type(body.get("trigger_type", current.trigger_type or "Daily"))
+        # 优先沿用缓存的稳定标识（模块路径.类名）；缺失时按索引反查任务实例，
+        # 避免修改后 -t 退化为对排序敏感的数字索引格式
+        task_identifier = getattr(current, "task_identifier", "") or None
+        if not task_identifier:
+            try:
+                tasks = list(self.executor.onetime_tasks or [])
+                if 1 <= task_index <= len(tasks):
+                    task = tasks[task_index - 1]
+                    task_identifier = f"{task.__class__.__module__}.{task.__class__.__name__}"
+            except Exception:
+                logger.exception("Failed to resolve task_identifier for modified scheduled task")
         success = self.schedule_manager.replace_task(
             task_name=current.name, task_index=task_index, trigger_type=trigger,
             timeout_hours=int(body.get("timeout_hours", 0)), start_hour=int(body.get("start_hour", 9)),
             start_minute=int(body.get("start_minute", 0)), auto_exit=bool(body.get("auto_exit", True)), enabled=current.enabled,
             description=current.description, interval_days=int(body.get("interval_days", current.interval_days)),
             interval_hours=int(body.get("interval_hours", current.interval_hours)),
+            task_identifier=task_identifier,
         )
         if not success:
             raise RuntimeError("Failed to modify scheduled task")

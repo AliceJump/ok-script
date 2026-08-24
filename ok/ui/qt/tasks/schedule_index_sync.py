@@ -10,18 +10,23 @@ ok-script 的 Windows 计划任务通过 `-t N`（1-based 索引）定位 onetim
 
 方案
 ----
-保留 ok 原生 `-t N`，不修改任何运行时解析 / 创建 / 修改对话框逻辑，
+保留 ok 原生 `-t`，不修改任何运行时解析 / 创建 / 修改对话框逻辑，
 仅在每次启动时（MainWindow.__init__ 构造 ScheduleTaskTab 之前、start_runtime 之前）
-自动校正旧索引：
+自动校正并把 -t 目标统一迁移为稳定标识（模块路径.类名，如
+``src.tasks.onetime.DailyTask``，对排序免疫）：
 
 1. 读取 schedule_tasks_cache.json；
 2. 只处理本应用（如 ``\\ok-ef\\``）下的任务，其它 ok-* 应用的只读任务不动；
-3. 以缓存任务的 ``name``（创建时选择的任务名，不随排序变化）为权威身份，
-   在当前 ``onetime_tasks`` 中查找新索引；
-4. 把 ``-t X``（旧索引或历史迁移成的任务名）改写为新索引，
-   并同步更新缓存 / xml_config / Windows 计划任务（COM，失败回退 schtasks）；
-5. 改写本次进程 ``sys.argv``，保证本次启动也使用正确索引；
-6. 幂等：每次进程只校正一次，无变更时不写文件、不调 COM，找不到 name 的任务跳过。
+3. 解析缓存任务当前的 -t 目标（数字索引 / 历史任务名 / 模块路径.类名），
+   以缓存任务名（创建时选择的任务名，不随排序变化）或已缓存的稳定标识为权威身份，
+   在当前 ``onetime_tasks`` 中定位目标任务；
+4. 把 `-t X` 统一改写为当前实际的 ``模块路径.类名``（旧数字索引、历史任务名、
+   过期模块路径均迁移），并同步更新缓存 / xml_config / Windows 计划任务
+   （COM，失败回退 schtasks）；同时回填缓存的 ``task_index`` / ``task_identifier``
+   元数据（无需改写 Windows 时仅回填元数据）；
+5. 改写本次进程 ``sys.argv``，保证本次启动也使用正确目标；
+6. 幂等：每次进程只校正一次，目标与元数据均已正确时不写文件、不调 COM，
+   找不到 name 的任务跳过。
 
 调用点
 ------
@@ -195,11 +200,11 @@ def _extract_task_target(item: dict) -> Optional[str]:
     return None
 
 
-def _replace_task_target(value: str, new_index: int) -> str:
-    """把字符串中的 `-t X` 改写为 `-t {new_index}`。"""
+def _replace_task_target(value: str, new_target) -> str:
+    """把字符串中的 `-t X` 改写为 `-t {new_target}`（数字索引或模块路径.类名）。"""
     if not value:
         return value
-    return _TASK_ARG_PATTERN.sub(lambda m: f"{m.group(1)}-t {new_index}", value)
+    return _TASK_ARG_PATTERN.sub(lambda m: f"{m.group(1)}-t {new_target}", value)
 
 
 def _register_task_xml_via_schtasks(path: str, new_xml: str) -> bool:
@@ -263,11 +268,12 @@ def _register_task_xml(path: str, new_xml: str) -> bool:
     return _register_task_xml_via_schtasks(path, new_xml)
 
 
-def _apply_correction(item: dict, new_target) -> bool:
-    """改写单个缓存任务的 -t 目标，并同步 Windows 计划任务。
+def _apply_correction(item: dict, new_target, index=None) -> bool:
+    """改写单个缓存任务的 -t 目标为稳定标识，并同步 Windows 计划任务。
 
-    new_target 可为数字索引（int）或模块路径.类名（str）。
-    仅当 Windows 计划任务（若存在）成功用新 XML 重新注册后，才改写缓存字段并返回 True；
+    new_target 为模块路径.类名（str）；index 为对应的 1-based 数字索引（可选）。
+    仅当 Windows 计划任务（若存在）成功用新 XML 重新注册后，才改写缓存字段
+    （xml_config / actions / task_index / task_identifier）并返回 True；
     注册失败或无法改写时返回 False，保持缓存不变，下次启动会重试。
     """
     old_xml = item.get("xml_config") or ""
@@ -288,22 +294,34 @@ def _apply_correction(item: dict, new_target) -> bool:
     item["actions"] = new_actions
     if isinstance(new_target, int):
         item["task_index"] = new_target
+    else:
+        item["task_identifier"] = new_target
+    if isinstance(index, int):
+        item["task_index"] = index
     return True
 
 
 def _collect_corrections(
         data: dict, name_to_index: Dict[str, int], root_path: str,
         onetime_tasks: Sequence = (),
-) -> List[Tuple[str, dict, object, str]]:
-    """收集需要修正的缓存任务。
+) -> Tuple[List[Tuple[str, dict, object, object, int]], List[Tuple[str, dict, int, str]]]:
+    """收集需要修正 / 回填的缓存任务。
 
-    返回 [(task_key, item, new_target, old_target), ...]，new_target 为数字索引或
-    模块路径.类名（str）。仅处理本应用（root_path）下的任务：
-      - 旧格式 `-t N`（数字）：任务名存在且 -t 不是当前索引时修正为当前索引；
-      - 新格式 `-t 模块路径.类名`：模块路径匹配失败（模块移动/重命名）且类名唯一
-        匹配时，修正为当前实际的模块路径.类名。
+    返回 (corrections, metadata_updates)：
+      corrections: [(task_key, item, new_identifier, old_target, index), ...]
+        -t 目标需要改写为稳定标识（需重新注册 Windows 计划任务）的条目；
+      metadata_updates: [(task_key, item, index, identifier), ...]
+        -t 目标已是稳定标识、仅需回填 task_index / task_identifier 元数据的条目。
+
+    仅处理本应用（root_path）下的任务，统一迁移规则：
+      - 旧格式 `-t N`（数字索引）：按任务名（缺失时回退缓存的稳定标识）定位
+        当前任务，迁移为模块路径.类名；
+      - 历史任务名格式（如 `-t 日常任务`）：按任务名定位，迁移为模块路径.类名；
+      - `-t 模块路径.类名`：模块路径匹配失败（模块移动/重命名）且类名唯一匹配时，
+        修正为当前实际的模块路径.类名。
     """
-    corrections: List[Tuple[str, dict, object, str]] = []
+    corrections: List[Tuple[str, dict, object, object, int]] = []
+    metadata_updates: List[Tuple[str, dict, int, str]] = []
     for task_key, item in data.items():
         if not isinstance(item, dict):
             continue
@@ -314,51 +332,53 @@ def _collect_corrections(
         if old_target is None:
             continue
 
-        if old_target.isdigit():
-            # 旧格式：数字索引，按任务名校正
+        index: Optional[int] = None
+        if "." in old_target:
+            # 稳定标识格式（可能因模块移动而过期）
+            index = _resolve_identifier_index(onetime_tasks, old_target)
+        elif old_target.isdigit():
+            # 旧数字索引格式：索引会漂移，优先按任务名定位当前任务
             name = item.get("name")
-            if not name or str(name) not in name_to_index:
-                continue
-            new_index = name_to_index[str(name)]
-            # 已是正确索引则跳过（幂等）
-            if int(old_target) == new_index:
-                continue
-            corrections.append((task_key, item, new_index, old_target))
-        elif "." in old_target:
-            # 新格式：模块路径.类名（稳定标识）
-            current_module_path = _resolve_identifier_index(onetime_tasks, old_target)
-            if current_module_path is None:
-                # 任务在当前 onetime_tasks 中找不到（已删除或类名也匹配不到），跳过
-                continue
-            task = _task_at_index(onetime_tasks, current_module_path)
-            if task is None:
-                continue
-            new_identifier = f"{task.__class__.__module__}.{task.__class__.__name__}"
-            # 已是当前模块路径则跳过（幂等）
-            if new_identifier == old_target:
-                continue
-            corrections.append((task_key, item, new_identifier, old_target))
+            if name and str(name) in name_to_index:
+                index = name_to_index[str(name)]
+            else:
+                # 任务名缺失时回退缓存中的稳定标识
+                cached_identifier = str(item.get("task_identifier") or "").strip()
+                if cached_identifier:
+                    index = _resolve_identifier_index(onetime_tasks, cached_identifier)
         else:
-            # 历史任务名格式（如 -t 日常任务）：按任务名校正为当前数字索引
+            # 历史任务名格式（如 -t 日常任务）：按任务名定位当前任务
             name = item.get("name")
             if not name or str(name) not in name_to_index:
                 continue
-            new_index = name_to_index[str(name)]
-            corrections.append((task_key, item, new_index, old_target))
-    return corrections
+            index = name_to_index[str(name)]
+
+        if index is None:
+            # 任务在当前 onetime_tasks 中找不到（已删除或无法唯一匹配），跳过
+            continue
+        task = _task_at_index(onetime_tasks, index)
+        if task is None:
+            continue
+        identifier = f"{task.__class__.__module__}.{task.__class__.__name__}"
+
+        if str(old_target) != identifier:
+            corrections.append((task_key, item, identifier, old_target, index))
+        elif item.get("task_index") != index or item.get("task_identifier") != identifier:
+            metadata_updates.append((task_key, item, index, identifier))
+    return corrections, metadata_updates
 
 
-def _perform_corrections(corrections) -> Tuple[int, Dict[str, int]]:
+def _perform_corrections(corrections) -> Tuple[int, Dict[str, str]]:
     """逐项应用修正，返回 (成功修正数, 旧 -t 目标 -> 新目标 的 argv 映射)。
 
-    new_target 可为数字索引或模块路径.类名。仅统计并记录真正注册成功的修正；
+    new_target 为模块路径.类名（str）。仅统计并记录真正注册成功的修正；
     失败的条目保持缓存原样，下次启动会重试。
     """
     changed = 0
-    argv_target_map: Dict[str, int] = {}
-    for task_key, item, new_target, old_target in corrections:
+    argv_target_map: Dict[str, str] = {}
+    for task_key, item, new_target, old_target, index in corrections:
         try:
-            if _apply_correction(item, new_target):
+            if _apply_correction(item, new_target, index):
                 changed += 1
                 argv_target_map.setdefault(str(old_target), str(new_target))
         except Exception:
@@ -366,11 +386,32 @@ def _perform_corrections(corrections) -> Tuple[int, Dict[str, int]]:
     return changed, argv_target_map
 
 
-def _rewrite_current_process_argv(argv_target_map: Dict[str, int]):
-    """改写本次进程的 -t 目标，使本次启动也使用新索引。
+def _apply_metadata_updates(metadata_updates) -> int:
+    """仅回填缓存元数据（task_index / task_identifier），不触碰 Windows 计划任务。
+
+    适用于 -t 目标已是稳定标识、但缓存缺少定位元数据的条目（如旧版本创建、
+    或被强制同步冲掉过）。返回回填的条目数。
+    """
+    changed = 0
+    for task_key, item, index, identifier in metadata_updates:
+        try:
+            item["task_index"] = index
+            item["task_identifier"] = identifier
+            changed += 1
+            logger.info(
+                f"schedule index sync: backfilled metadata for {task_key} "
+                f"(task_index={index}, task_identifier={identifier})"
+            )
+        except Exception:
+            logger.exception(f"schedule index sync metadata backfill failed for {task_key}")
+    return changed
+
+
+def _rewrite_current_process_argv(argv_target_map: Dict[str, str]):
+    """改写本次进程的 -t 目标，使本次启动也使用新目标（稳定标识）。
 
     同时改写 sys.argv，并把 ``og.ok.args['task']``（在 OK.__init__ 已解析）同步为
-    新索引，否则 start_runtime 读取到的仍是旧索引。
+    新目标，否则 start_runtime 读取到的仍是旧目标。
     """
     if not argv_target_map:
         return
@@ -412,14 +453,17 @@ def _write_cache(cache_file: Path, data: dict):
 
 
 def sync_schedule_task_indexes(onetime_tasks: Optional[Sequence] = None) -> int:
-    """启动时校正计划任务索引，返回被修正的任务数。
+    """启动时校正计划任务 -t 目标并回填元数据，返回被处理的任务数。
+
+    把所有可定位的 -t 目标统一迁移为稳定标识（模块路径.类名），
+    并回填缓存的 task_index / task_identifier。
 
     Args:
         onetime_tasks: 当前 onetime_tasks 列表；不传时自动从 og.executor 读取
             （测试可 monkeypatch `_onetime_tasks` 传入假列表）。
 
     Returns:
-        被修正的任务数（0 表示无需修正或已跳过）。
+        被修正（含仅回填元数据）的任务数（0 表示无需处理或已跳过）。
     """
     global _SYNCED
     if _SYNCED:
@@ -451,31 +495,38 @@ def sync_schedule_task_indexes(onetime_tasks: Optional[Sequence] = None) -> int:
             f"schedule index sync: read {len(data)} cache entries from {cache_file}"
         )
 
-        corrections = _collect_corrections(
+        corrections, metadata_updates = _collect_corrections(
             data, name_to_index, _schedule_root_path().rstrip("\\"), tasks
         )
-        if not corrections:
+        if not corrections and not metadata_updates:
             logger.info("schedule index sync: no stale indexes to correct")
             return 0
         logger.info(
             f"schedule index sync: {len(corrections)} stale task(s) found: "
-            + ", ".join(f"{item.get('name')} (old -t {old})" for _, item, _, old in corrections)
+            + ", ".join(f"{item.get('name')} (old -t {old})" for _, item, _, old, _ in corrections)
+            + f"; {len(metadata_updates)} task(s) need metadata backfill"
         )
 
         changed, argv_target_map = _perform_corrections(corrections)
+        metadata_changed = _apply_metadata_updates(metadata_updates)
         if changed:
             _rewrite_current_process_argv(argv_target_map)
+        if changed or metadata_changed:
             _write_cache(cache_file, data)
             detail = ", ".join(
-                f"{item.get('name')} -> -t {target}" for _, item, target, _ in corrections
+                f"{item.get('name')} -> -t {target}"
+                for _, item, target, _, _ in corrections
             )
-            logger.info(f"schedule index sync corrected {changed} task(s): {detail}")
+            logger.info(
+                f"schedule index sync corrected {changed} task(s): {detail}; "
+                f"backfilled metadata for {metadata_changed} task(s)"
+            )
         else:
             logger.warning(
                 "schedule index sync: corrections failed, cache kept unchanged, "
                 "will retry next launch"
             )
-        return changed
+        return changed + metadata_changed
     except Exception:
         logger.exception("schedule index sync failed")
         return 0
