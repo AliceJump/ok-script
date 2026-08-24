@@ -86,6 +86,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
+    # 同步器通过 og.config 解析缓存路径与任务根路径，需在调用前注入实际配置
+    from ok import og
+    og.config = config
     tasks = build_onetime_tasks(config)
     if not tasks:
         print("No onetime_tasks loaded, nothing to correct.")

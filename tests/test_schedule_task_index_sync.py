@@ -323,6 +323,42 @@ def test_skips_unknown_task_name(isolated):
     assert saved["\\ok-ef\\stale"]["task_index"] == 15
     assert registered == []
 
+def test_skips_entry_without_path(isolated):
+    """缓存条目无 path 时跳过，不写缓存不调 COM（避免缓存与系统不一致）。"""
+    patch_mod, cache_file, registered = isolated
+    daily = _make_task("日常任务")
+    onetime_tasks = [daily, _make_task("自动送货")]
+    data = {
+        "\\ok-ef\\daily": _make_cache_entry(
+            "", "日常任务", actions="main.py -t 15 -e",
+            xml_config=_xml_with("main.py -t 15 -e"), task_index=15),
+    }
+    cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    assert patch_mod.sync_schedule_task_indexes(onetime_tasks=onetime_tasks) == 0
+    assert registered == []
+    saved = json.loads(cache_file.read_text(encoding="utf-8"))
+    entry = saved["\\ok-ef\\daily"]
+    assert entry["task_index"] == 15
+    assert "-t 15" in entry["xml_config"]
+
+
+def test_skips_duplicate_task_name(isolated):
+    """重名任务时跳过 name 匹配，不静默迁移到错误的同名任务。"""
+    patch_mod, cache_file, registered = isolated
+    # 两个同名任务（不同类）
+    onetime_tasks = [_make_task("日常任务"), _make_task("日常任务")]
+    data = {
+        "\\ok-ef\\daily": _make_cache_entry(
+            "\\ok-ef\\daily", "日常任务", actions="main.py -t 15 -e",
+            xml_config=_xml_with("main.py -t 15 -e"), task_index=15),
+    }
+    cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    assert patch_mod.sync_schedule_task_indexes(onetime_tasks=onetime_tasks) == 0
+    assert registered == []
+    saved = json.loads(cache_file.read_text(encoding="utf-8"))
+    assert saved["\\ok-ef\\daily"]["task_index"] == 15
 
 def test_digit_target_resolved_by_cached_identifier_when_name_missing(isolated):
     """数字目标 + 任务名缺失时，回退用缓存的稳定标识定位目标任务。"""
