@@ -126,8 +126,11 @@ def _name_to_index_map(onetime_tasks: Sequence) -> Dict[str, int]:
     一个任务会注册多个键：任务名、类名、模块路径.类名（稳定标识）。
     任务名重复（重名）时从映射中移除并记录警告，避免把缓存条目静默迁移到
     错误的同名任务；类名/模块路径重复时保持第一个（与既有行为一致）。
+    重名检测使用独立的任务名集合，避免任务名与其它任务的类名/模块路径
+    相同时被误判为重名。
     """
     id_to_index = {}
+    seen_names = set()
     duplicated_names = set()
     for index, task in enumerate(onetime_tasks, start=1):
         name = getattr(task, "name", None)
@@ -135,9 +138,11 @@ def _name_to_index_map(onetime_tasks: Sequence) -> Dict[str, int]:
         module_path = f"{task.__class__.__module__}.{class_name}"
         if name:
             str_name = str(name)
-            if str_name in id_to_index:
+            if str_name in seen_names:
                 duplicated_names.add(str_name)
-            id_to_index.setdefault(str_name, index)
+            else:
+                seen_names.add(str_name)
+                id_to_index[str_name] = index
         id_to_index.setdefault(class_name, index)
         id_to_index.setdefault(module_path, index)
     for name in duplicated_names:
@@ -296,8 +301,15 @@ def _apply_correction(item: dict, new_target, index=None) -> bool:
         # 避免缓存被改写但系统任务未同步、永久不一致
         logger.warning("schedule index sync: cache entry has no path, skip")
         return False
-    if not (old_xml and new_xml):
+    if not old_xml:
         logger.error(f"schedule index sync: no xml_config to rewrite task {path}, skip")
+        return False
+    if new_xml == old_xml:
+        # -t 目标可能只存在于 actions，xml_config 无可替换的 -t：
+        # 此时无法通过 XML 更新 Windows 任务，跳过并保持缓存不变，避免缓存与系统不一致
+        logger.error(
+            f"schedule index sync: xml_config has no replaceable -t target for {path}, skip"
+        )
         return False
     if not _register_task_xml(path, new_xml):
         logger.error(f"schedule index sync: failed to update task {path}, keep cache unchanged")

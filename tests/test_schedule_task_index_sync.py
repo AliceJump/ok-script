@@ -360,6 +360,38 @@ def test_skips_duplicate_task_name(isolated):
     saved = json.loads(cache_file.read_text(encoding="utf-8"))
     assert saved["\\ok-ef\\daily"]["task_index"] == 15
 
+
+def test_name_to_index_map_does_not_confuse_name_with_class():
+    """任务名与其它任务的类名相同时，不应被误判为重名并移除。"""
+    t1 = _make_task("日常任务")
+    t2 = _make_task(t1.__class__.__name__)  # t2 的名字 = t1 的类名
+    mapping = sync_patch._name_to_index_map([t1, t2])
+    # t1 的类名（= t2 的名字）不应被当作重名移除
+    assert t1.__class__.__name__ in mapping
+    assert mapping["日常任务"] == 1
+
+
+def test_skips_when_xml_has_no_replaceable_target(isolated):
+    """xml_config 无 -t 可替换时跳过（new_xml == old_xml），避免缓存与系统不一致。"""
+    patch_mod, cache_file, registered = isolated
+    daily = _make_task("日常任务")
+    onetime_tasks = [daily, _make_task("自动送货")]
+    data = {
+        "\\ok-ef\\daily": _make_cache_entry(
+            "\\ok-ef\\daily", "日常任务",
+            actions="main.py -t 15 -e",
+            xml_config=_xml_with("main.py -e"),  # xml 无 -t
+            task_index=15),
+    }
+    cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    assert patch_mod.sync_schedule_task_indexes(onetime_tasks=onetime_tasks) == 0
+    assert registered == []
+    saved = json.loads(cache_file.read_text(encoding="utf-8"))
+    entry = saved["\\ok-ef\\daily"]
+    assert entry["task_index"] == 15
+    assert "-t 15" in entry["actions"]
+
 def test_digit_target_resolved_by_cached_identifier_when_name_missing(isolated):
     """数字目标 + 任务名缺失时，回退用缓存的稳定标识定位目标任务。"""
     patch_mod, cache_file, registered = isolated
