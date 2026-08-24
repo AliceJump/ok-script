@@ -391,6 +391,8 @@ def test_skips_when_xml_has_no_replaceable_target(isolated):
     entry = saved["\\ok-ef\\daily"]
     assert entry["task_index"] == 15
     assert "-t 15" in entry["actions"]
+    # xml_config 必须保持不变（跳过注册时不得改写 XML）
+    assert entry["xml_config"] == data["\\ok-ef\\daily"]["xml_config"]
 
 def test_digit_target_resolved_by_cached_identifier_when_name_missing(isolated):
     """数字目标 + 任务名缺失时，回退用缓存的稳定标识定位目标任务。"""
